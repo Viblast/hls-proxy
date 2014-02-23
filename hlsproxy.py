@@ -72,7 +72,7 @@ class HlsPlaylist:
 				elif key == "#EXT-X-MEDIA-SEQUENCE":
 					self.mediaSequence = int(value)
 				elif key == "#EXTINF":
-					dur = int(value.split(',')[0])
+					dur = float(value.split(',')[0])
 					url = lines[lineIdx]
 					lineIdx += 1
 					item = HlsItem(dur, url, absoluteUrlBase+url, self.mediaSequence+msIter)
@@ -184,7 +184,7 @@ class HlsProxy:
 	
 	def refreshPlaylist(self):
 		d = self.agent.request('GET', self.srvPlaylistUrl,
-			Headers({'User-Agent': ['TODO Quick Time']}),
+			Headers({'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}),
 			None)
 		d.addCallback(self.cbRequest)
 		d.addErrback(lambda e: e.printTraceback())
@@ -211,7 +211,7 @@ class HlsProxy:
 	
 	def requestFragment(self, item):
 		d = self.agent.request('GET', item.absoluteUrl,
-			Headers({'User-Agent': ['TODO Quick Time']}),
+			Headers({'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}),
 			None)
 		thiz = self
 		d.addCallback(lambda r: thiz.cbFragment(r, item))
