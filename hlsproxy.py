@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import os, copy
 from sys import argv
 from pprint import pformat
 import argparse
@@ -12,10 +13,14 @@ from twisted.web.http_headers import Headers
 class HlsItem:
 	def __init__(self):
 		self.dur = 0
-		self.url = 0
-	def __init__(self, dur, url):
+		self.relativeUrl = ""
+		self.absoluteUrl = ""
+		self.mediaSequence = 0
+	def __init__(self, dur, relativeUrl, absoluteUrl, mediaSequence):
 		self.dur = dur
-		self.url = url
+		self.relativeUrl = relativeUrl
+		self.absoluteUrl = absoluteUrl
+		self.mediaSequence = mediaSequence
 
 class HlsPlaylist:
 	def __init__(self):
@@ -27,18 +32,32 @@ class HlsPlaylist:
 	def reset(self):
 		self.version = 0
 		self.targetDuration = 0
+		self.mediaSequence = 0
 		self.items = []
 		self.errors = []
+	
+	def getItem(self, mediaSequence):
+		idx = mediaSequence - self.mediaSequence
+		if idx >= 0 and idx<len(self.items):
+			return self.items[idx]
+		else:
+			return None
 		
-	def fromStr(self, playlist):
+	def fromStr(self, playlist, playlistUrl):
+		absoluteUrlBase = playlistUrl[:playlistUrl.rfind('/')+1]
+		
 		lines = playlist.split("\n")
 		lines = filter(lambda x: x != "", lines)
 		lines = map(lambda x: x.strip(), lines)
 		
+		if len(lines) == 0:
+			self.errors.append("Empty playlist")
+			return
 		if lines[0] != "#EXTM3U":
 			self.errors.append("no #EXTM3U tag at the start of playlist")
 			return
 		lineIdx = 1
+		msIter = 0
 		while lineIdx < len(lines):
 			line = lines[lineIdx]
 			lineIdx += 1
@@ -53,20 +72,34 @@ class HlsPlaylist:
 				elif key == "#EXT-X-MEDIA-SEQUENCE":
 					self.mediaSequence = int(value)
 				elif key == "#EXTINF":
-					dur = int(value.split(',')[0]),
+					dur = int(value.split(',')[0])
 					url = lines[lineIdx]
 					lineIdx += 1
-					item = HlsItem(dur, url)
+					item = HlsItem(dur, url, absoluteUrlBase+url, self.mediaSequence+msIter)
+					msIter += 1
+					self.items.append(item)
 				else:
 					print "Unknown tag: ", key
 			else:
 				print "Dangling playlit item: ", line
+		if len(self.items) == 0:
+			self.errors.append("No items in the playlist")
+	
+	def toStr(self):
+		res = "#EXTM3U\n"
+		res += "#EXT-X-VERSION:" + str(self.version) + "\n"
+		res += "#EXT-X-TARGETDURATION:" + str(self.targetDuration) + "\n"
+		res += "#EXT-X-MEDIA-SEQUENCE:" + str(self.mediaSequence) + "\n"
+		for item in self.items:
+			res += "#EXTINF:" + str(item.dur) + ",\n"
+			res += item.relativeUrl + "\n"
+		return res
 
 class HlsProxy:
 	def __init__(self, reactor):
 		self.reactor = reactor
 		self.agent = RedirectAgent(Agent(reactor))
-		self.clietPlaylist = HlsPlaylist()
+		self.clientPlaylist = HlsPlaylist()
 		self.verbose = False
 	
 	def run(self, hlsPlaylist):
@@ -92,22 +125,59 @@ class HlsProxy:
 			print 'Response body:'
 			print body
 		playlist = HlsPlaylist()
-		playlist.fromStr(body)
+		playlist.fromStr(body, self.srvPlaylistUrl)
 		self.onPlaylist(playlist)
+		
+	def getClientFilename(self, item):
+		return "stream" + str(item.mediaSequence) + ".ts"
 	
 	def onPlaylist(self, playlist):
 		if playlist.isValid():
-			pass
-			# delete items before playlist.entries[0]
-			#for item in playlist.items:
-				# request item
+			#deline old files
+			for item in self.clientPlaylist.items:
+				if playlist.getItem(item.mediaSequence) is None:
+					os.unlink(self.getClientFilename(item))
+			#request new ones
+			for item in playlist.items:
+				if self.clientPlaylist.getItem(item.mediaSequence) is None:
+					self.requestFragment(item)
 			#update the playlist
+			self.clientPlaylist = playlist
+			self.refreshClientPlaylist()
 			#wind playlist timer
 			self.reactor.callLater(playlist.targetDuration, self.refreshPlaylist)
 		else:
+			print 'The following errors where encountered while parsing the server playlist:'
+			for err in playlist.errors:
+				print '\t', err
 			print 'Invalide playlist. Retrying after default interval of 2s'
 			self.reactor.callLater(2, self.retryPlaylist)
 			
+	def writeFile(self, fileName, content):
+		print 'cwd=', os.getcwd(), ' writing file', fileName 
+		f = open(fileName, 'w')
+		f.write(content)
+		f.flush()
+		os.fsync(f.fileno())
+		f.close()
+			
+	def refreshClientPlaylist(self):
+		playlist = self.clientPlaylist
+		pl = HlsPlaylist()
+		pl.version = playlist.version
+		pl.targetDuration = playlist.targetDuration
+		pl.mediaSequence = playlist.mediaSequence
+		for item in playlist.items:
+			itemFilename = self.getClientFilename(item)
+			print "itemFilename=", itemFilename
+			if os.path.isfile(itemFilename):
+				ritem = copy.deepcopy(item)
+				ritem.relativeUrl = itemFilename
+				pl.items.append(ritem)
+			else:
+				break
+		self.writeFile("stream.m3u8", pl.toStr())
+	
 	def retryPlaylist(self):
 		print 'Retrying playlist'
 		self.refreshPlaylist()
@@ -117,6 +187,34 @@ class HlsProxy:
 			Headers({'User-Agent': ['TODO Quick Time']}),
 			None)
 		d.addCallback(self.cbRequest)
+		d.addErrback(lambda e: e.printTraceback())
+		return d
+	
+	def cbFragment(self, response, item):
+		if self.verbose:
+			print 'Response version:', response.version
+			print 'Response code:', response.code
+			print 'Response phrase:', response.phrase
+			print 'Response headers:'
+			print pformat(list(response.headers.getAllRawHeaders()))
+		d = readBody(response)
+		thiz = self
+		d.addCallback(lambda b: thiz.cbFragmentBody(b, item))
+		d.addErrback(lambda e: e.printTraceback())
+		return d
+	
+	def cbFragmentBody(self, body, item):
+		if not(self.clientPlaylist.getItem(item.mediaSequence) is None):
+			self.writeFile(self.getClientFilename(item), body)
+		#else old request
+		self.refreshClientPlaylist()
+	
+	def requestFragment(self, item):
+		d = self.agent.request('GET', item.absoluteUrl,
+			Headers({'User-Agent': ['TODO Quick Time']}),
+			None)
+		thiz = self
+		d.addCallback(lambda r: thiz.cbFragment(r, item))
 		d.addErrback(lambda e: e.printTraceback())
 		return d
 
