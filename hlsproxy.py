@@ -187,8 +187,13 @@ class HlsProxy:
 			Headers({'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}),
 			None)
 		d.addCallback(self.cbRequest)
-		d.addErrback(lambda e: e.printTraceback())
+		d.addErrback(self.onGetPlaylistError)
 		return d
+
+	def onGetPlaylistError(self, e):
+		print "Error while getting the playlist: ", e
+	        print "Retring after default interval of 2s"
+		self.reactor.callLater(2, self.retryPlaylist)
 	
 	def cbFragment(self, response, item):
 		if self.verbose:
