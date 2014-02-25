@@ -140,7 +140,10 @@ class HlsProxy:
 			#deline old files
 			for item in self.clientPlaylist.items:
 				if playlist.getItem(item.mediaSequence) is None:
-					os.unlink(self.getClientFilename(item))
+					try:
+						os.unlink(self.getClientFilename(item))
+					except:
+						print "Warning. Cannot remove fragment ", self.getClientFilename(item), ". Probably it wasn't downloaded in time."
 			#request new ones
 			for item in playlist.items:
 				if self.clientPlaylist.getItem(item.mediaSequence) is None:
