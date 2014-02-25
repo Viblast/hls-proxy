@@ -7,6 +7,7 @@ import argparse
 
 from twisted.internet import defer
 from twisted.internet.task import react
+from twisted.web.client import HTTPConnectionPool
 from twisted.web.client import Agent, RedirectAgent, readBody
 from twisted.web.http_headers import Headers
 
@@ -56,7 +57,7 @@ class HlsPlaylist:
 		if lines[0] != "#EXTM3U":
 			self.errors.append("no #EXTM3U tag at the start of playlist")
 			return
-		lineIdx = 1
+		lineIdx = 1 
 		msIter = 0
 		while lineIdx < len(lines):
 			line = lines[lineIdx]
@@ -98,7 +99,10 @@ class HlsPlaylist:
 class HlsProxy:
 	def __init__(self, reactor):
 		self.reactor = reactor
-		self.agent = RedirectAgent(Agent(reactor))
+		pool = HTTPConnectionPool(reactor)
+		pool.maxPersistentPerHost = 2
+		pool.cachedConnectionTimeout = 600
+		self.agent = RedirectAgent(Agent(reactor, pool=pool))
 		self.clientPlaylist = HlsPlaylist()
 		self.verbose = False
 	
