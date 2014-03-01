@@ -138,8 +138,11 @@ class HlsProxy:
 		playlist.fromStr(body, self.srvPlaylistUrl)
 		self.onPlaylist(playlist)
 		
-	def getClientFilename(self, item):
-		return self.outDir + "stream" + str(item.mediaSequence) + ".ts"
+	def getSegmentFilename(self, item):
+		return self.outDir + self.getSegmentRelativeUrl(item)
+	
+	def getSegmentRelativeUrl(self, item):
+		return "stream" + str(item.mediaSequence) + ".ts"
 	
 	def getClientPlaylist(self):
 		return self.outDir + "stream.m3u8"
@@ -150,9 +153,9 @@ class HlsProxy:
 			for item in self.clientPlaylist.items:
 				if playlist.getItem(item.mediaSequence) is None:
 					try:
-						os.unlink(self.getClientFilename(item))
+						os.unlink(self.getSegmentFilename(item))
 					except:
-						print "Warning. Cannot remove fragment ", self.getClientFilename(item), ". Probably it wasn't downloaded in time."
+						print "Warning. Cannot remove fragment ", self.getSegmentFilename(item), ". Probably it wasn't downloaded in time."
 			#request new ones
 			for item in playlist.items:
 				if self.clientPlaylist.getItem(item.mediaSequence) is None:
@@ -184,13 +187,13 @@ class HlsProxy:
 		pl.targetDuration = playlist.targetDuration
 		pl.mediaSequence = playlist.mediaSequence
 		for item in playlist.items:
-			itemFilename = self.getClientFilename(item)
-			print "itemFilename=", itemFilename
+			itemFilename = self.getSegmentFilename(item)
 			if os.path.isfile(itemFilename):
 				ritem = copy.deepcopy(item)
-				ritem.relativeUrl = itemFilename
+				ritem.relativeUrl = self.getSegmentRelativeUrl(item)
 				pl.items.append(ritem)
 			else:
+				print "Stopping playlist generation on itemFilename=", itemFilename
 				break
 		self.writeFile(self.getClientPlaylist(), pl.toStr())
 	
@@ -226,7 +229,7 @@ class HlsProxy:
 	
 	def cbFragmentBody(self, body, item):
 		if not(self.clientPlaylist.getItem(item.mediaSequence) is None):
-			self.writeFile(self.getClientFilename(item), body)
+			self.writeFile(self.getSegmentFilename(item), body)
 		#else old request
 		self.refreshClientPlaylist()
 	
