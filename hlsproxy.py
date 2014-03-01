@@ -139,7 +139,10 @@ class HlsProxy:
 		self.onPlaylist(playlist)
 		
 	def getClientFilename(self, item):
-		return "stream" + str(item.mediaSequence) + ".ts"
+		return self.outDir + "stream" + str(item.mediaSequence) + ".ts"
+	
+	def getClientPlaylist(self):
+		return self.outDir + "stream.m3u8"
 	
 	def onPlaylist(self, playlist):
 		if playlist.isValid():
@@ -166,10 +169,9 @@ class HlsProxy:
 			print 'Invalide playlist. Retrying after default interval of 2s'
 			self.reactor.callLater(2, self.retryPlaylist)
 			
-	def writeFile(self, fileName, content):
-		targetFilename = self.outDir + fileName
-		print 'cwd=', os.getcwd(), ' writing file', targetFilename 
-		f = open(targetFilename, 'w')
+	def writeFile(self, filename, content):
+		print 'cwd=', os.getcwd(), ' writing file', filename 
+		f = open(filename, 'w')
 		f.write(content)
 		f.flush()
 		os.fsync(f.fileno())
@@ -190,7 +192,7 @@ class HlsProxy:
 				pl.items.append(ritem)
 			else:
 				break
-		self.writeFile("stream.m3u8", pl.toStr())
+		self.writeFile(self.getClientPlaylist(), pl.toStr())
 	
 	def retryPlaylist(self):
 		print 'Retrying playlist'
