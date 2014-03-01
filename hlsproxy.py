@@ -99,8 +99,8 @@ class HlsPlaylist:
 class HlsProxy:
 	def __init__(self, reactor):
 		self.reactor = reactor
-		pool = HTTPConnectionPool(reactor)
-		pool.maxPersistentPerHost = 2
+		pool = HTTPConnectionPool(reactor, persistent=True)
+		pool.maxPersistentPerHost = 1
 		pool.cachedConnectionTimeout = 600
 		self.agent = RedirectAgent(Agent(reactor, pool=pool))
 		self.clientPlaylist = HlsPlaylist()
