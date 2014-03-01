@@ -17,11 +17,14 @@ class HlsItem:
 		self.relativeUrl = ""
 		self.absoluteUrl = ""
 		self.mediaSequence = 0
-	def __init__(self, dur, relativeUrl, absoluteUrl, mediaSequence):
-		self.dur = dur
-		self.relativeUrl = relativeUrl
-		self.absoluteUrl = absoluteUrl
-		self.mediaSequence = mediaSequence
+		
+class HlsVarian:
+	def __init__(self):
+		self.programId=0
+		self.bandwidth=0
+		self.relativeUrl=""
+		self.absoluteUrl=""
+
 
 class HlsPlaylist:
 	def __init__(self):
@@ -35,6 +38,7 @@ class HlsPlaylist:
 		self.targetDuration = 0
 		self.mediaSequence = 0
 		self.items = []
+		self.variants = []
 		self.errors = []
 	
 	def getItem(self, mediaSequence):
@@ -45,7 +49,7 @@ class HlsPlaylist:
 			return None
 		
 	def fromStr(self, playlist, playlistUrl):
-		absoluteUrlBase = playlistUrl[:playlistUrl.rfind('/')+1]
+		self.absoluteUrlBase = playlistUrl[:playlistUrl.rfind('/')+1]
 		
 		lines = playlist.split("\n")
 		lines = filter(lambda x: x != "", lines)
@@ -65,26 +69,52 @@ class HlsPlaylist:
 			if line[0] == '#':
 				keyValue = line.split(':')
 				key = keyValue[0]
-				value = keyValue[1]
+				value = keyValue[1] if len(keyValue) >= 2 else None
 				if key == "#EXT-X-VERSION":
 					self.version = int(value)
 				elif key == "#EXT-X-TARGETDURATION":
 					self.targetDuration = int(value)
 				elif key == "#EXT-X-MEDIA-SEQUENCE":
 					self.mediaSequence = int(value)
+				elif key == "#EXT-X-STREAM-INF":
+					self.handleVariant(value, lines[lineIdx]),
+					lineIdx += 1
 				elif key == "#EXTINF":
 					dur = float(value.split(',')[0])
 					url = lines[lineIdx]
 					lineIdx += 1
-					item = HlsItem(dur, url, absoluteUrlBase+url, self.mediaSequence+msIter)
+					item = HlsItem()
+					item.dur = dur
+					self.fillUrls(item, url)
+					item.mediaSequence = self.mediaSequence + msIter;
 					msIter += 1
+					
 					self.items.append(item)
 				else:
 					print "Unknown tag: ", key
 			else:
 				print "Dangling playlit item: ", line
-		if len(self.items) == 0:
+		if len(self.items) == 0 and len(self.variants) == 0:
 			self.errors.append("No items in the playlist")
+			
+	def handleVariant(self, argStr, playlistUrl):
+		variant = HlsVarian()
+		self.variants.append(variant)
+		keyValStrings = argStr.split(',')
+		for keyValStr in keyValStrings:
+			keyVal = keyValStr.split('=')
+			if keyVal[0] == "PROGRAM-ID":
+				variant.programId = int(keyVal[1])
+			elif keyVal[0] == "BANDWIDTH":
+				variant.bandwidth = int(keyVal[1])
+		self.fillUrls(variant, playlistUrl)
+	
+	def fillUrls(self, item, playlistUrl):
+		item.relativeUrl = playlistUrl
+		if playlistUrl.find('://') > 0:
+			item.absoluteUrl = playlistUrl
+		else:
+			item.absoluteUrl = self.absoluteUrlBase + playlistUrl
 	
 	def toStr(self):
 		res = "#EXTM3U\n"
@@ -209,28 +239,42 @@ class HlsProxy:
 	
 	def onPlaylist(self, playlist):
 		if playlist.isValid():
-			#deline old files
-			for item in self.clientPlaylist.items:
-				if playlist.getItem(item.mediaSequence) is None:
-					try:
-						os.unlink(self.getSegmentFilename(item))
-					except:
-						print "Warning. Cannot remove fragment ", self.getSegmentFilename(item), ". Probably it wasn't downloaded in time."
-			#request new ones
-			for item in playlist.items:
-				if self.clientPlaylist.getItem(item.mediaSequence) is None:
-					self.requestFragment(item)
-			#update the playlist
-			self.clientPlaylist = playlist
-			self.refreshClientPlaylist()
-			#wind playlist timer
-			self.reactor.callLater(playlist.targetDuration, self.refreshPlaylist)
+			self.onValidPlaylist(playlist)
 		else:
 			print 'The following errors where encountered while parsing the server playlist:'
 			for err in playlist.errors:
 				print '\t', err
 			print 'Invalide playlist. Retrying after default interval of 2s'
 			self.reactor.callLater(2, self.retryPlaylist)
+			
+	def onValidPlaylist(self, playlist):
+		if len(playlist.variants) == 0:
+			self.onSegmentPlaylist(playlist)
+		else:
+			self.onVariantPlaylist(playlist)
+			
+	def onSegmentPlaylist(self, playlist):
+		#deline old files
+		for item in self.clientPlaylist.items:
+			if playlist.getItem(item.mediaSequence) is None:
+				try:
+					os.unlink(self.getSegmentFilename(item))
+				except:
+					print "Warning. Cannot remove fragment ", self.getSegmentFilename(item), ". Probably it wasn't downloaded in time."
+		#request new ones
+		for item in playlist.items:
+			if self.clientPlaylist.getItem(item.mediaSequence) is None:
+				self.requestFragment(item)
+		#update the playlist
+		self.clientPlaylist = playlist
+		self.refreshClientPlaylist()
+		#wind playlist timer
+		self.reactor.callLater(playlist.targetDuration, self.refreshPlaylist)
+		
+	def onVariantPlaylist(self, playlist):
+		print "Found variant playlist. Choosing program id=", playlist.variants[0].programId, " url=", playlist.variants[0].absoluteUrl
+		self.srvPlaylistUrl = playlist.variants[0].absoluteUrl
+		self.refreshPlaylist()
 			
 	def writeFile(self, filename, content):
 		print 'cwd=', os.getcwd(), ' writing file', filename 
@@ -262,6 +306,7 @@ class HlsProxy:
 		self.refreshPlaylist()
 	
 	def refreshPlaylist(self):
+		print "Getting playlist from ", self.srvPlaylistUrl
 		d = self.reqQ.request('GET', self.srvPlaylistUrl,
 			Headers({'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}),
 			None)
@@ -294,6 +339,7 @@ class HlsProxy:
 		self.refreshClientPlaylist()
 	
 	def requestFragment(self, item):
+		print "Getting fragment from ", item.absoluteUrl
 		d = self.reqQ.request('GET', item.absoluteUrl,
 			Headers({'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}),
 			None)
