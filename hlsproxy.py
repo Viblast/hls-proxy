@@ -115,17 +115,35 @@ class HttpReqQ:
 		self.q.append(req)
 		self._processQ()
 		return req.d
-		
+
+	def readBody(self, httpHeader):
+		self.busy = True
+		dRes = defer.Deferred()
+		d = readBody(httpHeader)
+		d.addCallback(lambda body: self._readBodyCallback(dRes, body))
+		d.addErrback(lambda err: self._readBodyErrback(dRes, err))
+		return dRes
+	
 	def _reqCallback(self, req, res):
 		self.busy = False
-		self._processQ()
 		req.d.callback(res)
+		self._processQ()
 	
 	def _reqErrback(self, req, res):
 		self.busy = False
-		self._processQ()
 		req.d.errback(res)
+		self._processQ()
 		
+	def _readBodyCallback(self, dRes, body):
+		self.busy = False
+		dRes.callback(body)
+		self._processQ()
+	
+	def _readBodyErrback(self, dRes, err):
+		self.busy = False
+		dRes.errback(err)
+		self._processQ()
+	
 	def _processQ(self):
 		if not(self.busy) and len(self.q) > 0:
 			req = self.q.pop(0)
@@ -167,7 +185,7 @@ class HlsProxy:
 			print 'Response phrase:', response.phrase
 			print 'Response headers:'
 			print pformat(list(response.headers.getAllRawHeaders()))
-		d = readBody(response)
+		d = self.reqQ.readBody(response)
 		d.addCallback(self.cbBody)
 		d.addErrback(lambda e: e.printTraceback())
 		return d
@@ -263,7 +281,7 @@ class HlsProxy:
 			print 'Response phrase:', response.phrase
 			print 'Response headers:'
 			print pformat(list(response.headers.getAllRawHeaders()))
-		d = readBody(response)
+		d = self.reqQ.readBody(response)
 		thiz = self
 		d.addCallback(lambda b: thiz.cbFragmentBody(b, item))
 		d.addErrback(lambda e: e.printTraceback())
