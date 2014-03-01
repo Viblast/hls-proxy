@@ -95,6 +95,48 @@ class HlsPlaylist:
 			res += "#EXTINF:" + str(item.dur) + ",\n"
 			res += item.relativeUrl + "\n"
 		return res
+		
+class HttpReqQ:
+	def __init__(self, agent):
+		self.agent = agent
+		self.busy = False
+		self.q = []
+	
+	class Req:
+		def __init__(self, method, url, headers, body):
+			self.method = method
+			self.url = url
+			self.headers = headers
+			self.body = body
+			self.d = defer.Deferred()
+	
+	def request(self, method, url, headers, body):
+		req = HttpReqQ.Req(method, url, headers, body)
+		self.q.append(req)
+		self._processQ()
+		return req.d
+		
+	def _reqCallback(self, req, res):
+		self.busy = False
+		self._processQ()
+		req.d.callback(res)
+	
+	def _reqErrback(self, req, res):
+		self.busy = False
+		self._processQ()
+		req.d.errback(res)
+		
+	def _processQ(self):
+		if not self.busy and len(self.q) > 0:
+			req = self.q.pop(0)
+			dAdapter = self.agent.request(req.method,
+						      req.url,
+						      req.headers,
+						      req.body)
+			dAdapter.addCallback(lambda res: self._reqCallback(req, res))
+			dAdapter.addErrback(lambda res: self._reqErrback(req, res))
+			self.busy = True
+		
 
 class HlsProxy:
 	def __init__(self, reactor):
@@ -103,6 +145,7 @@ class HlsProxy:
 		pool.maxPersistentPerHost = 1
 		pool.cachedConnectionTimeout = 600
 		self.agent = RedirectAgent(Agent(reactor, pool=pool))
+		self.reqQ = HttpReqQ(self.agent)
 		self.clientPlaylist = HlsPlaylist()
 		self.verbose = False
 		self.outDir = ""
@@ -202,7 +245,7 @@ class HlsProxy:
 		self.refreshPlaylist()
 	
 	def refreshPlaylist(self):
-		d = self.agent.request('GET', self.srvPlaylistUrl,
+		d = self.reqQ.request('GET', self.srvPlaylistUrl,
 			Headers({'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}),
 			None)
 		d.addCallback(self.cbRequest)
@@ -234,7 +277,7 @@ class HlsProxy:
 		self.refreshClientPlaylist()
 	
 	def requestFragment(self, item):
-		d = self.agent.request('GET', item.absoluteUrl,
+		d = self.reqQ.request('GET', item.absoluteUrl,
 			Headers({'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}),
 			None)
 		thiz = self
