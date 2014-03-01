@@ -105,6 +105,12 @@ class HlsProxy:
 		self.agent = RedirectAgent(Agent(reactor, pool=pool))
 		self.clientPlaylist = HlsPlaylist()
 		self.verbose = False
+		self.outDir = ""
+	
+	def setOutDir(self, outDir):
+		outDir = outDir.strip()
+		if len(outDir) > 0:
+			self.outDir = outDir + '/'
 	
 	def run(self, hlsPlaylist):
 		self.finished = defer.Deferred()
@@ -161,8 +167,9 @@ class HlsProxy:
 			self.reactor.callLater(2, self.retryPlaylist)
 			
 	def writeFile(self, fileName, content):
-		print 'cwd=', os.getcwd(), ' writing file', fileName 
-		f = open(fileName, 'w')
+		targetFilename = self.outDir + fileName
+		print 'cwd=', os.getcwd(), ' writing file', targetFilename 
+		f = open(targetFilename, 'w')
 		f.write(content)
 		f.flush()
 		os.fsync(f.fileno())
@@ -234,6 +241,8 @@ class HlsProxy:
 def runProxy(reactor, args):
 	proxy = HlsProxy(reactor)
 	proxy.verbose = args.v
+	if not(args.o is None):
+		proxy.setOutDir(args.o)
 	d = proxy.run(args.hls_playlist)
 	return d
 	
@@ -241,6 +250,7 @@ def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("hls_playlist")
 	parser.add_argument("-v", action="store_true")
+	parser.add_argument("-o");
 	args = parser.parse_args()
 	
 	react(runProxy, [args])
