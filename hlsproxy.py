@@ -127,7 +127,7 @@ class HttpReqQ:
 		req.d.errback(res)
 		
 	def _processQ(self):
-		if not self.busy and len(self.q) > 0:
+		if not(self.busy) and len(self.q) > 0:
 			req = self.q.pop(0)
 			dAdapter = self.agent.request(req.method,
 						      req.url,
@@ -136,7 +136,6 @@ class HttpReqQ:
 			dAdapter.addCallback(lambda res: self._reqCallback(req, res))
 			dAdapter.addErrback(lambda res: self._reqErrback(req, res))
 			self.busy = True
-		
 
 class HlsProxy:
 	def __init__(self, reactor):
