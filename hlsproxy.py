@@ -195,6 +195,7 @@ class HlsProxy:
 		self.reqQ = HttpReqQ(self.agent)
 		self.clientPlaylist = HlsPlaylist()
 		self.verbose = False
+		self.download = False
 		self.outDir = ""
 	
 	def setOutDir(self, outDir):
@@ -255,12 +256,13 @@ class HlsProxy:
 			
 	def onSegmentPlaylist(self, playlist):
 		#deline old files
-		for item in self.clientPlaylist.items:
-			if playlist.getItem(item.mediaSequence) is None:
-				try:
-					os.unlink(self.getSegmentFilename(item))
-				except:
-					print "Warning. Cannot remove fragment ", self.getSegmentFilename(item), ". Probably it wasn't downloaded in time."
+		if not(self.download):
+			for item in self.clientPlaylist.items:
+				if playlist.getItem(item.mediaSequence) is None:
+					try:
+						os.unlink(self.getSegmentFilename(item))
+					except:
+						print "Warning. Cannot remove fragment ", self.getSegmentFilename(item), ". Probably it wasn't downloaded in time."
 		#request new ones
 		for item in playlist.items:
 			if self.clientPlaylist.getItem(item.mediaSequence) is None:
@@ -352,6 +354,7 @@ class HlsProxy:
 def runProxy(reactor, args):
 	proxy = HlsProxy(reactor)
 	proxy.verbose = args.v
+	proxy.download = args.d
 	if not(args.o is None):
 		proxy.setOutDir(args.o)
 	d = proxy.run(args.hls_playlist)
@@ -361,6 +364,7 @@ def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("hls_playlist")
 	parser.add_argument("-v", action="store_true")
+	parser.add_argument("-d", action="store_true")
 	parser.add_argument("-o");
 	args = parser.parse_args()
 	
