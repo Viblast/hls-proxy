@@ -218,7 +218,7 @@ class HlsProxy:
 			print pformat(list(response.headers.getAllRawHeaders()))
 		d = self.reqQ.readBody(response)
 		d.addCallback(self.cbBody)
-		d.addErrback(lambda e: e.printTraceback())
+		d.addErrback(self.onGetPlaylistError)
 		return d
 		
 	def cbBody(self, body):
