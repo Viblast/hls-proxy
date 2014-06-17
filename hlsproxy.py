@@ -24,6 +24,11 @@ class HlsVarian:
 		self.bandwidth=0
 		self.relativeUrl=""
 		self.absoluteUrl=""
+		
+class HlsEncryption:
+	def __init__(self):
+		self.method=""
+		self.uri=""
 
 
 class HlsPlaylist:
@@ -40,6 +45,7 @@ class HlsPlaylist:
 		self.items = []
 		self.variants = []
 		self.errors = []
+		self.encryption = None
 	
 	def getItem(self, mediaSequence):
 		idx = mediaSequence - self.mediaSequence
@@ -47,6 +53,10 @@ class HlsPlaylist:
 			return self.items[idx]
 		else:
 			return None
+			
+	def splitInTwo(self, line, delimiter):
+		delimiterIndex = line.find(delimiter)
+		return [line[0:delimiterIndex], line[delimiterIndex+1:]]
 		
 	def fromStr(self, playlist, playlistUrl):
 		self.absoluteUrlBase = playlistUrl[:playlistUrl.rfind('/')+1]
@@ -67,7 +77,7 @@ class HlsPlaylist:
 			line = lines[lineIdx]
 			lineIdx += 1
 			if line[0] == '#':
-				keyValue = line.split(':')
+				keyValue = self.splitInTwo(line, ':')
 				key = keyValue[0]
 				value = keyValue[1] if len(keyValue) >= 2 else None
 				if key == "#EXT-X-VERSION":
@@ -76,6 +86,8 @@ class HlsPlaylist:
 					self.targetDuration = int(value)
 				elif key == "#EXT-X-MEDIA-SEQUENCE":
 					self.mediaSequence = int(value)
+				elif key == "#EXT-X-KEY":
+					self.handleEncryptionInfo(value);
 				elif key == "#EXT-X-STREAM-INF":
 					self.handleVariant(value, lines[lineIdx]),
 					lineIdx += 1
@@ -96,6 +108,17 @@ class HlsPlaylist:
 				print "Dangling playlit item: ", line
 		if len(self.items) == 0 and len(self.variants) == 0:
 			self.errors.append("No items in the playlist")
+	
+	def handleEncryptionInfo(self, argStr):
+		encryption = HlsEncryption()
+		self.encryption = encryption
+		keyValString = self.splitInTwo(argStr, ',')
+		for keyValStr in keyValString:
+			keyVal = self.splitInTwo(keyValStr, '=')
+			if keyVal[0] == "METHOD":
+				encryption.method = keyVal[1]
+			elif keyVal[0] == "URI":
+				encryption.uri = keyVal[1].strip('"')
 			
 	def handleVariant(self, argStr, playlistUrl):
 		variant = HlsVarian()
@@ -121,6 +144,8 @@ class HlsPlaylist:
 		res += "#EXT-X-VERSION:" + str(self.version) + "\n"
 		res += "#EXT-X-TARGETDURATION:" + str(self.targetDuration) + "\n"
 		res += "#EXT-X-MEDIA-SEQUENCE:" + str(self.mediaSequence) + "\n"
+		if self.encryption != None:
+			res += "#EXT-X-KEY:METHOD=" + self.encryption.method + ",URI=" + self.encryption.uri + '\n'
 		for item in self.items:
 			res += "#EXTINF:" + str(item.dur) + ",\n"
 			res += item.relativeUrl + "\n"
@@ -197,6 +222,7 @@ class HlsProxy:
 		self.verbose = False
 		self.download = False
 		self.outDir = ""
+		self.encryptionHandled=False
 	
 	def setOutDir(self, outDir):
 		outDir = outDir.strip()
@@ -249,6 +275,14 @@ class HlsProxy:
 			self.reactor.callLater(2, self.retryPlaylist)
 			
 	def onValidPlaylist(self, playlist):
+		if playlist.encryption != None and not self.encryptionHandled:
+			self.encryptionHandled = True
+			if playlist.encryption.method == 'AES-128' and playlist.encryption.uri != '':
+				self.requestResource(playlist.encryption.uri, "key")
+			else:
+				print 'Unsupported encryption method ', playlist.encryption.method, 'uri', playlist.encryption.uri
+				
+		
 		if len(playlist.variants) == 0:
 			self.onSegmentPlaylist(playlist)
 		else:
@@ -292,6 +326,10 @@ class HlsProxy:
 		pl.version = playlist.version
 		pl.targetDuration = playlist.targetDuration
 		pl.mediaSequence = playlist.mediaSequence
+		if playlist.encryption != None:
+			pl.encryption = HlsEncryption()
+			pl.encryption.method = playlist.encryption.method
+			pl.encryption.uri = 'key'
 		for item in playlist.items:
 			itemFilename = self.getSegmentFilename(item)
 			if os.path.isfile(itemFilename):
@@ -349,6 +387,24 @@ class HlsProxy:
 		d.addCallback(lambda r: thiz.cbFragment(r, item))
 		d.addErrback(lambda e: e.printTraceback())
 		return d
+		
+	def requestResource(self, url, localFilename):
+		print "Getting resource from ", url, " -> ", localFilename
+		d = self.reqQ.request('GET', url, Headers({'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}), None)
+		thiz = self
+		d.addCallback(lambda r: thiz.cbRequestResource(r, localFilename))
+		d.addErrback(lambda e: e.printTraceback())
+		return d
+	
+	def cbRequestResource(self, response, localFilename):
+		d = self.reqQ.readBody(response)
+		thiz = self
+		d.addCallback(lambda b: thiz.cbRequestResourceBody(b, localFilename))
+		d.addErrback(lambda e: e.printTraceback())
+		return d
+	
+	def cbRequestResourceBody(self, body, localFilename):
+		self.writeFile(localFilename, body)
 
 
 def runProxy(reactor, args):
