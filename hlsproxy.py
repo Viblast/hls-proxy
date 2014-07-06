@@ -152,8 +152,9 @@ class HlsPlaylist:
 		return res
 		
 class HttpReqQ:
-	def __init__(self, agent):
+	def __init__(self, agent, reactor):
 		self.agent = agent
+		self.reactor = reactor
 		self.busy = False
 		self.q = []
 	
@@ -209,7 +210,14 @@ class HttpReqQ:
 			dAdapter.addCallback(lambda res: self._reqCallback(req, res))
 			dAdapter.addErrback(lambda res: self._reqErrback(req, res))
 			self.busy = True
-
+			#set a 3 min timeout for all request. If unsuccessfull then call the errback
+			timeoutCall = self.reactor.callLater(3*60, dAdapter.cancel)
+			def completed(passthrough):
+				if timeoutCall.active():
+					timeoutCall.cancel()
+				return passthrough
+			dAdapter.addBoth(completed)
+			
 class HlsProxy:
 	def __init__(self, reactor):
 		self.reactor = reactor
@@ -217,7 +225,7 @@ class HlsProxy:
 		pool.maxPersistentPerHost = 1
 		pool.cachedConnectionTimeout = 600
 		self.agent = RedirectAgent(Agent(reactor, pool=pool))
-		self.reqQ = HttpReqQ(self.agent)
+		self.reqQ = HttpReqQ(self.agent, self.reactor)
 		self.clientPlaylist = HlsPlaylist()
 		self.verbose = False
 		self.download = False
