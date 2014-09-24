@@ -112,7 +112,7 @@ class HlsPlaylist:
 	def handleEncryptionInfo(self, argStr):
 		encryption = HlsEncryption()
 		self.encryption = encryption
-		keyValString = self.splitInTwo(argStr, ',')
+		keyValString = argStr.split(',')
 		for keyValStr in keyValString:
 			keyVal = self.splitInTwo(keyValStr, '=')
 			if keyVal[0] == "METHOD":
@@ -285,7 +285,7 @@ class HlsProxy:
 	def onValidPlaylist(self, playlist):
 		if playlist.encryption != None and not self.encryptionHandled:
 			self.encryptionHandled = True
-			if playlist.encryption.method == 'AES-128' and playlist.encryption.uri != '':
+			if playlist.encryption.method in ['AES-128', 'SAMPLE-AES'] and playlist.encryption.uri != '':
 				self.requestResource(playlist.encryption.uri, "key")
 			else:
 				print 'Unsupported encryption method ', playlist.encryption.method, 'uri', playlist.encryption.uri
