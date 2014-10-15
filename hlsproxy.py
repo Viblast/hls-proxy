@@ -140,6 +140,12 @@ class HlsPlaylist:
 			item.absoluteUrl = self.absoluteUrlBase + playlistUrl
 	
 	def toStr(self):
+		if not self.variants:
+			return self.toStrNormal()
+		else:
+			return self.toStrVariant()
+	
+	def toStrNormal(self):
 		res = "#EXTM3U\n"
 		res += "#EXT-X-VERSION:" + str(self.version) + "\n"
 		res += "#EXT-X-TARGETDURATION:" + str(self.targetDuration) + "\n"
@@ -149,6 +155,14 @@ class HlsPlaylist:
 		for item in self.items:
 			res += "#EXTINF:" + str(item.dur) + ",\n"
 			res += item.relativeUrl + "\n"
+		return res
+	
+	def toStrVariant(self):
+		res = "#EXTM3U\n"
+		res += "#EXT-X-VERSION:" + str(self.version) + "\n"
+		for variant in self.variants:
+			res += "#EXT-X-STREAM-INF:" + "PROGRAM-ID=" + str(variant.programId) + ",BANDWIDTH=" + str(variant.bandwidth) + "\n"
+			res += variant.absoluteUrl + "\n"
 		return res
 		
 class HttpReqQ:
@@ -316,9 +330,31 @@ class HlsProxy:
 		self.reactor.callLater(playlist.targetDuration, self.refreshPlaylist)
 		
 	def onVariantPlaylist(self, playlist):
-		print "Found variant playlist. Choosing program id=", playlist.variants[0].programId, " url=", playlist.variants[0].absoluteUrl
-		self.srvPlaylistUrl = playlist.variants[0].absoluteUrl
-		self.refreshPlaylist()
+		print "Found variant playlist."
+		masterPlaylist = HlsPlaylist()
+		masterPlaylist.version = playlist.version
+		
+		for variant in playlist.variants:
+			subOutDir = self.outDir + str(variant.bandwidth)
+			print "Starting a sub hls-proxy for channel with bandwith ", variant.bandwidth, " in directory ", subOutDir
+			try:
+				os.mkdir(subOutDir)
+			except OSError:
+				pass #mkdir throws if dir already exists
+			subProxy = HlsProxy(self.reactor)
+			subProxy.verbose = self.verbose
+			subProxy.download = self.download
+			subProxy.setOutDir(subOutDir)
+			d = subProxy.run(variant.absoluteUrl)
+			#TODO add the deffered to self.finised somehow
+			
+			masterVariant = HlsVarian()
+			masterPlaylist.variants.append(masterVariant)
+			masterVariant.absoluteUrl = str(variant.bandwidth) + "/stream.m3u8"
+			masterVariant.programId = variant.programId
+			masterVariant.bandwidth = variant.bandwidth
+		
+		self.writeFile(self.getClientPlaylist(), masterPlaylist.toStr())
 			
 	def writeFile(self, filename, content):
 		print 'cwd=', os.getcwd(), ' writing file', filename 
