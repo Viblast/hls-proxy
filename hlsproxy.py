@@ -190,11 +190,13 @@ class HttpReqQ:
 		self.busy = True
 		dRes = defer.Deferred()
 		d = readBody(httpHeader)
+		print("Reading body")
 		d.addCallback(lambda body: self._readBodyCallback(dRes, body))
 		d.addErrback(lambda err: self._readBodyErrback(dRes, err))
 		return dRes
 	
 	def _reqCallback(self, req, res):
+		print("Body read")
 		self.busy = False
 		req.d.callback(res)
 		self._processQ()
@@ -216,6 +218,7 @@ class HttpReqQ:
 	
 	def _processQ(self):
 		if not(self.busy) and len(self.q) > 0:
+			print("Processing a new request from the queue")
 			req = self.q.pop(0)
 			dAdapter = self.agent.request(req.method,
 						      req.url,
