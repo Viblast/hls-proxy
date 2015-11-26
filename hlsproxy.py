@@ -347,6 +347,7 @@ class HlsProxy:
 			subProxy = HlsProxy(self.reactor)
 			subProxy.verbose = self.verbose
 			subProxy.download = self.download
+                        subProxy.referer = self.referer
 			subProxy.setOutDir(subOutDir)
 			d = subProxy.run(variant.absoluteUrl)
 			#TODO add the deffered to self.finised somehow
@@ -395,11 +396,17 @@ class HlsProxy:
 	def refreshPlaylist(self):
 		print "Getting playlist from ", self.srvPlaylistUrl
 		d = self.reqQ.request('GET', self.srvPlaylistUrl,
-			Headers({'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}),
+			Headers(self.httpHeaders()),
 			None)
 		d.addCallback(self.cbRequest)
 		d.addErrback(self.onGetPlaylistError)
 		return d
+
+	def httpHeaders(self):
+                headers = {'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}
+                if self.referer:
+                        headers['Referer'] = [self.referer]
+                return headers
 
 	def onGetPlaylistError(self, e):
 		print "Error while getting the playlist: ", e
@@ -428,7 +435,7 @@ class HlsProxy:
 	def requestFragment(self, item):
 		print "Getting fragment from ", item.absoluteUrl
 		d = self.reqQ.request('GET', item.absoluteUrl,
-			Headers({'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}),
+			Headers(self.httpHeaders()),
 			None)
 		thiz = self
 		d.addCallback(lambda r: thiz.cbFragment(r, item))
@@ -437,7 +444,7 @@ class HlsProxy:
 		
 	def requestResource(self, url, localFilename):
 		print "Getting resource from ", url, " -> ", localFilename
-		d = self.reqQ.request('GET', url, Headers({'User-Agent': ['AppleCoreMedia/1.0.0.13B42 (Macintosh; U; Intel Mac OS X 10_9_1; en_us)']}), None)
+		d = self.reqQ.request('GET', url, Headers(self.httpHeaders()), None)
 		thiz = self
 		d.addCallback(lambda r: thiz.cbRequestResource(r, localFilename))
 		d.addErrback(lambda e: e.printTraceback())
@@ -458,6 +465,7 @@ def runProxy(reactor, args):
 	proxy = HlsProxy(reactor)
 	proxy.verbose = args.v
 	proxy.download = args.d
+        proxy.referer = args.referer
 	if not(args.o is None):
 		proxy.setOutDir(args.o)
 	d = proxy.run(args.hls_playlist)
@@ -468,6 +476,7 @@ def main():
 	parser.add_argument("hls_playlist")
 	parser.add_argument("-v", action="store_true")
 	parser.add_argument("-d", action="store_true")
+	parser.add_argument("--referer")
 	parser.add_argument("-o");
 	args = parser.parse_args()
 	
