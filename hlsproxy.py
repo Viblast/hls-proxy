@@ -7,6 +7,8 @@ from sys import argv
 from pprint import pformat
 import argparse
 
+import subprocess
+
 from twisted.internet import defer
 from twisted.internet.task import react
 from twisted.web.client import HTTPConnectionPool
@@ -252,6 +254,13 @@ class HlsProxy:
         self.outDir = ""
         self.encryptionHandled=False
 
+        # required for the dump durations functionality
+        self.dur_dump_file = None
+        self.dur_avproble_acc = 0
+        self.dur_vt_acc = 0
+        self.dur_playlist_acc = 0
+
+
     def setOutDir(self, outDir):
         outDir = outDir.strip()
         if len(outDir) > 0:
@@ -351,6 +360,7 @@ class HlsProxy:
             subProxy.verbose = self.verbose
             subProxy.download = self.download
             subProxy.referer = self.referer
+            subProxy.dump_durations = self.dump_durations
             subProxy.setOutDir(subOutDir)
             d = subProxy.run(variant.absoluteUrl)
             #TODO add the deffered to self.finised somehow
@@ -370,6 +380,26 @@ class HlsProxy:
         f.flush()
         os.fsync(f.fileno())
         f.close()
+
+    def dump_duration(self, filename, item):
+        if not self.dump_durations: return
+        format = '{filename: <30} {avp_dur: <12} {m3u8_dur: <10} {vt_dur: <12} {avp_m3u8_diff: <10} {vt_m3u8_diff: <10}   {avp_acc: <12} {m3u8_acc: <12} {vt_acc: <12} {avp_m3u8_acc_diff: <10} {vt_m3u8_acc_diff: <10}\n'
+        if not self.dur_dump_file:
+            self.dur_dump_file = open(self.outDir + 'duration-dump', 'wt')
+            self.dur_dump_file.write(format.format(filename='FILENAME', avp_dur='AVPROBE DUR', m3u8_dur='M3U8 DUR', avp_m3u8_diff='AVP - M3U8',
+                                    vt_dur='VT DUR', vt_m3u8_diff='VT - M3U8',
+                                    avp_acc='AVPROBE ACC', m3u8_acc='M3U8 ACC', avp_m3u8_acc_diff='AVP-M3U8 ACC',
+                                    vt_acc='VT ACC', vt_m3u8_acc_diff='VT-M3U8 ACC'))
+        avprobe_duration = subprocess.check_output('avprobe -loglevel quiet -show_format_entry duration "{}"'.format(filename), shell=True).strip()
+        vt_duration = subprocess.check_output('videotools -f ts -op duration "{}"'.format(filename), shell=True).strip()
+        self.dur_avproble_acc += float(avprobe_duration)
+        self.dur_vt_acc += float(vt_duration)
+        self.dur_playlist_acc += float(item.dur)
+        self.dur_dump_file.write(format.format(filename=filename, avp_dur=avprobe_duration, m3u8_dur=item.dur, avp_m3u8_diff=float(avprobe_duration) - float(item.dur),
+                                vt_dur=vt_duration, vt_m3u8_diff=float(vt_duration) - float(item.dur),
+                                avp_acc=self.dur_avproble_acc, m3u8_acc=self.dur_playlist_acc, avp_m3u8_acc_diff=self.dur_avproble_acc - self.dur_playlist_acc,
+                                vt_acc=self.dur_vt_acc, vt_m3u8_acc_diff=self.dur_vt_acc - self.dur_playlist_acc))
+        self.dur_dump_file.flush()
 
     def refreshClientPlaylist(self):
         playlist = self.clientPlaylist
@@ -432,6 +462,7 @@ class HlsProxy:
     def cbFragmentBody(self, body, item):
         if not(self.clientPlaylist.getItem(item.mediaSequence) is None):
             self.writeFile(self.getSegmentFilename(item), body)
+            self.dump_duration(self.getSegmentFilename(item), item)
         #else old request
         self.refreshClientPlaylist()
 
@@ -469,6 +500,7 @@ def runProxy(reactor, args):
     proxy.verbose = args.v
     proxy.download = args.d
     proxy.referer = args.referer
+    proxy.dump_durations = args.dump_durations
     if not(args.o is None):
         proxy.setOutDir(args.o)
     d = proxy.run(args.hls_playlist)
@@ -479,6 +511,7 @@ def main():
     parser.add_argument("hls_playlist")
     parser.add_argument("-v", action="store_true")
     parser.add_argument("-d", action="store_true")
+    parser.add_argument("--dump-durations", action="store_true")
     parser.add_argument("--referer")
     parser.add_argument("-o");
     args = parser.parse_args()
