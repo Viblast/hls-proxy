@@ -290,6 +290,7 @@ class HlsProxy:
             print body
         playlist = HlsPlaylist()
         playlist.fromStr(body, self.srvPlaylistUrl)
+        self._clientPlaylistText = body
         self.onPlaylist(playlist)
 
     def getSegmentFilename(self, item):
@@ -300,6 +301,9 @@ class HlsProxy:
 
     def getClientPlaylist(self):
         return self.outDir + "stream.m3u8"
+
+    def get_individial_client_playlist(self, media_sequence):
+        return self.outDir + "stream." + str(media_sequence) + ".m3u8"
 
     def onPlaylist(self, playlist):
         if playlist.isValid():
@@ -361,6 +365,7 @@ class HlsProxy:
             subProxy.download = self.download
             subProxy.referer = self.referer
             subProxy.dump_durations = self.dump_durations
+            subProxy.save_individual_playlists = self.save_individual_playlists
             subProxy.setOutDir(subOutDir)
             d = subProxy.run(variant.absoluteUrl)
             #TODO add the deffered to self.finised somehow
@@ -421,6 +426,9 @@ class HlsProxy:
                 print "Stopping playlist generation on itemFilename=", itemFilename
                 break
         self.writeFile(self.getClientPlaylist(), pl.toStr())
+        if self.save_individual_playlists:
+            individual_pl_fn = self.get_individial_client_playlist(pl.mediaSequence)
+            self.writeFile(individual_pl_fn, self._clientPlaylistText)
 
     def retryPlaylist(self):
         print 'Retrying playlist'
@@ -501,6 +509,7 @@ def runProxy(reactor, args):
     proxy.download = args.d
     proxy.referer = args.referer
     proxy.dump_durations = args.dump_durations
+    proxy.save_individual_playlists = args.save_individual_playlists
     if not(args.o is None):
         proxy.setOutDir(args.o)
     d = proxy.run(args.hls_playlist)
@@ -512,6 +521,7 @@ def main():
     parser.add_argument("-v", action="store_true")
     parser.add_argument("-d", action="store_true")
     parser.add_argument("--dump-durations", action="store_true")
+    parser.add_argument("--save-individual-playlists", action="store_true")
     parser.add_argument("--referer")
     parser.add_argument("-o");
     args = parser.parse_args()
