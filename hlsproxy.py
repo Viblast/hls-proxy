@@ -122,7 +122,7 @@ class HlsPlaylist:
             if keyVal[0] == "METHOD":
                 encryption.method = keyVal[1]
             elif keyVal[0] == "URI":
-                encryption.uri = keyVal[1].strip('"')
+                encryption.uri = urlparse.urljoin(self.absoluteUrlBase, keyVal[1].strip('"'))
 
     def handleVariant(self, argStr, playlistUrl):
         variant = HlsVarian()
