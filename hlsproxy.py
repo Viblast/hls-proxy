@@ -6,6 +6,7 @@ import os, copy
 from sys import argv
 from pprint import pformat
 import argparse
+import re
 
 import subprocess
 
@@ -28,6 +29,7 @@ class HlsVarian:
         self.bandwidth=0
         self.relativeUrl=""
         self.absoluteUrl=""
+        self.codecs=""
 
 class HlsEncryption:
     def __init__(self):
@@ -127,13 +129,14 @@ class HlsPlaylist:
     def handleVariant(self, argStr, playlistUrl):
         variant = HlsVarian()
         self.variants.append(variant)
-        keyValStrings = argStr.split(',')
-        for keyValStr in keyValStrings:
-            keyVal = keyValStr.split('=')
-            if keyVal[0] == "PROGRAM-ID":
-                variant.programId = int(keyVal[1])
-            elif keyVal[0] == "BANDWIDTH":
-                variant.bandwidth = int(keyVal[1])
+        kv = dict(re.findall(r'([\w-]+)=(".*?"|\d+)', argStr))
+        for key, val in kv.iteritems():
+            if key == "PROGRAM-ID":
+                variant.programId = int(val)
+            elif key == "BANDWIDTH":
+                variant.bandwidth = int(val)
+            elif key == "CODECS":
+                variant.codecs = val
         self.fillUrls(variant, playlistUrl)
 
     def fillUrls(self, item, playlistUrl):
@@ -166,7 +169,10 @@ class HlsPlaylist:
         res = "#EXTM3U\n"
         res += "#EXT-X-VERSION:" + str(self.version) + "\n"
         for variant in self.variants:
-            res += "#EXT-X-STREAM-INF:" + "PROGRAM-ID=" + str(variant.programId) + ",BANDWIDTH=" + str(variant.bandwidth) + "\n"
+            res += "#EXT-X-STREAM-INF:PROGRAM-ID={},BANDWIDTH={}".format(variant.programId, variant.bandwidth)
+            if variant.codecs:
+                res += ",CODECS={}".format(variant.codecs)
+            res += "\n"
             res += variant.absoluteUrl + "\n"
         return res
 
@@ -375,6 +381,7 @@ class HlsProxy:
             masterVariant.absoluteUrl = str(variant.bandwidth) + "/stream.m3u8"
             masterVariant.programId = variant.programId
             masterVariant.bandwidth = variant.bandwidth
+            masterVariant.codecs = variant.codecs
 
         self.writeFile(self.getClientPlaylist(), masterPlaylist.toStr())
 
