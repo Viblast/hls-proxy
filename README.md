@@ -25,8 +25,7 @@ The VoD stream will be downloaded in the output directory (`-o`). In this case t
  * All HLS v3 features are supported including Live, VoD, ABR, and encrypted streams
 
 ## Dependencies
-hls-proxy requires python-2.7 and Twisted-13.2. The start-proxy.sh will download and setup any required dependencies so there is NO need to install anything apart from python.
+`hls-proxy` requires python-2.7, Twisted-13.2 and zope.interface. `start-proxy.sh` will download and setup Twisted. The only things that need to be installed manually are python and [zope.interface](https://pypi.python.org/pypi/zope.interface#download). Most linux distros provide these as packages. For detailed information on how to install them refer to your distro manual. Alternatively you can use `pip`.
 
 ## License
 MIT
-
