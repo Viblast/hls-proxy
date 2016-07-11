@@ -16,6 +16,15 @@ from twisted.web.client import HTTPConnectionPool
 from twisted.web.client import Agent, RedirectAgent, readBody
 from twisted.web.http_headers import Headers
 
+def make_p(dir):
+    try:
+        os.makedirs(dir)
+    except OSError as exc:
+        if exc.errno == errno.EEXIST and os.path.isdir(dir):
+            pass
+        else:
+            raise
+
 class HlsItem:
     def __init__(self):
         self.dur = 0
@@ -420,55 +429,43 @@ class HlsProxy:
         for variant in playlist.variants:
             subOutDir = self.outDir + str(variant.bandwidth)
             print "Starting a sub hls-proxy for channel with bandwith ", variant.bandwidth, " in directory ", subOutDir
-            try:
-                os.mkdir(subOutDir)
-            except OSError:
-                pass #mkdir throws if dir already exists
-            subProxy = HlsProxy(self.reactor)
-            subProxy.verbose = self.verbose
-            subProxy.download = self.download
-            subProxy.referer = self.referer
-            subProxy.dump_durations = self.dump_durations
-            subProxy.save_individual_playlists = self.save_individual_playlists
-            subProxy.setOutDir(subOutDir)
-            d = subProxy.run(variant.absoluteUrl)
-            #TODO add the deffered to self.finised somehow
-
+            make_p(subOutDir)
+            
             masterVariant = copy.deepcopy(variant)
             masterPlaylist.variants.append(masterVariant)
             masterVariant.absoluteUrl = str(variant.bandwidth) + "/stream.m3u8"
+            
+            self.start_subproxy(subOutDir, variant.absoluteUrl)
 
         for imedia, media in enumerate(playlist.medias):
-            if not media.relativeUrl:
-                # media without uri. This is valid. Just ignore it as there is not need to download anything
-                continue
             # imedia is appended just in case greoup, name, language turn out to be the same after sanitization
             mediaRelative = re.sub(r'[^\w-]', '', '{}-{}-{}-{}'.format(media.groupId, media.name, media.language, imedia))
             relativePath = os.path.join(media.type, mediaRelative)
             subOutDir = os.path.join(self.outDir, relativePath)
             print "Starting a sub hls-proxy for channel with bandwith ", media.type, " in directory ", subOutDir
-            try:
-                os.makedirs(subOutDir)
-            except OSError as exc:
-                if exc.errno == errno.EEXIST and os.path.isdir(subOutDir):
-                    pass
-                else:
-                    raise
-            subProxy = HlsProxy(self.reactor)
-            subProxy.verbose = self.verbose
-            subProxy.download = self.download
-            subProxy.referer = self.referer
-            subProxy.dump_durations = self.dump_durations
-            subProxy.save_individual_playlists = self.save_individual_playlists
-            subProxy.setOutDir(subOutDir)
-            d = subProxy.run(media.absoluteUrl)
-            #TODO add the deffered to self.finised somehow
-
+            make_p(subOutDir)
+            
             proxiedMedia = copy.deepcopy(media)
             masterPlaylist.medias.append(proxiedMedia)
             proxiedMedia.absoluteUrl = os.path.join(relativePath, "stream.m3u8")
+            
+            if media.relativeUrl:
+                # EXT-X-MEDIA URI is optional so it's possible to have a media wihtout relativeUrl
+                self.start_subproxy(subOutDir, media.absoluteUrl)
 
         self.writeFile(self.getClientPlaylist(), masterPlaylist.toStr())
+        
+    def start_subproxy(self, subOutDir, hlsUrl):
+        subProxy = HlsProxy(self.reactor)
+        subProxy.verbose = self.verbose
+        subProxy.download = self.download
+        subProxy.referer = self.referer
+        subProxy.dump_durations = self.dump_durations
+        subProxy.save_individual_playlists = self.save_individual_playlists
+        subProxy.setOutDir(subOutDir)
+        d = subProxy.run(hlsUrl)
+        #TODO add the deffered to self.finised somehow
+        return subProxy
 
     def writeFile(self, filename, content):
         print 'cwd=', os.getcwd(), ' writing file', filename
