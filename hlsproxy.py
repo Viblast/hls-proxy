@@ -2,7 +2,7 @@
 
 import urlparse
 
-import os, copy
+import os, copy, errno
 from sys import argv
 from pprint import pformat
 import argparse
@@ -30,6 +30,20 @@ class HlsVarian:
         self.relativeUrl=""
         self.absoluteUrl=""
         self.codecs=""
+        self.audio=""
+        self.subtitles=""
+
+class HlsMedia:
+    def __init__(self):
+        self.type = ""
+        self.groupId = ""
+        self.name = ""
+        self.language = ""
+        self.default = ""
+        self.autoselect = ""
+        self.forced = ""
+        self.relativeUrl = ""
+        self.absoluteUrl=""
 
 class HlsEncryption:
     def __init__(self):
@@ -50,6 +64,7 @@ class HlsPlaylist:
         self.mediaSequence = 0
         self.items = []
         self.variants = []
+        self.medias = []
         self.errors = []
         self.encryption = None
 
@@ -93,10 +108,12 @@ class HlsPlaylist:
                 elif key == "#EXT-X-MEDIA-SEQUENCE":
                     self.mediaSequence = int(value)
                 elif key == "#EXT-X-KEY":
-                    self.handleEncryptionInfo(value);
+                    self.handleEncryptionInfo(value)
                 elif key == "#EXT-X-STREAM-INF":
-                    self.handleVariant(value, lines[lineIdx]),
+                    self.handleVariant(value, lines[lineIdx])
                     lineIdx += 1
+                elif key == "#EXT-X-MEDIA":
+                    self.handleMedia(value)
                 elif key == "#EXTINF":
                     dur = float(value.split(',')[0])
                     url = lines[lineIdx]
@@ -137,7 +154,36 @@ class HlsPlaylist:
                 variant.bandwidth = int(val)
             elif key == "CODECS":
                 variant.codecs = val
+            elif key == "AUDIO":
+                variant.audio = val
+            elif key  == "SUBTITLES":
+                variant.subtitles = val
         self.fillUrls(variant, playlistUrl)
+
+    def handleMedia(self, argStr):
+        media = HlsMedia()
+        self.medias.append(media)
+        kv = dict(re.findall(r'([\w-]+)=(".*?"|\d+|\w+)', argStr))
+        uri = ''
+        for key, val in kv.iteritems():
+            val = val.strip('"')
+            if key == "TYPE":
+                media.type = val
+            elif key == "GROUP-ID":
+                media.groupId = val
+            elif key == "NAME":
+                media.name = val
+            elif key == "LANGUAGE":
+                media.language = val
+            elif key == "DEFAULT":
+                media.default = val
+            elif key == "FORCED":
+                media.forced = val
+            elif key == "AUTOSELECT":
+                media.autoselect = val
+            elif key == "URI":
+                uri = val
+        self.fillUrls(media, uri)
 
     def fillUrls(self, item, playlistUrl):
         item.relativeUrl = playlistUrl
@@ -167,11 +213,23 @@ class HlsPlaylist:
 
     def toStrVariant(self):
         res = "#EXTM3U\n"
-        res += "#EXT-X-VERSION:" + str(self.version) + "\n"
+        res += ("#EXT-X-VERSION:" + str(self.version) + "\n") if self.version else ''
+        for media in self.medias:
+            res += '#EXT-X-MEDIA:TYPE={},GROUP-ID="{}",NAME="{}"'.format(media.type, media.groupId, media.name)
+            res += ',DEFAULT={}'.format(media.default) if media.default else ''
+            res += ',FORCED={}'.format(media.forced) if media.forced else ''
+            res += ',LANGUAGE="{}"'.format(media.language) if media.language else ''
+            res += ',AUTOSELECT={}'.format(media.autoselect) if media.autoselect else ''
+            res += ',URI="{}"'.format(media.absoluteUrl) if media.absoluteUrl else ''
+            res += '\n'
         for variant in self.variants:
             res += "#EXT-X-STREAM-INF:PROGRAM-ID={},BANDWIDTH={}".format(variant.programId, variant.bandwidth)
             if variant.codecs:
                 res += ",CODECS={}".format(variant.codecs)
+            if variant.audio:
+                res += ",AUDIO={}".format(variant.audio)
+            if variant.subtitles:
+                res += ",SUBTITLES={}".format(variant.subtitles)
             res += "\n"
             res += variant.absoluteUrl + "\n"
         return res
@@ -376,12 +434,39 @@ class HlsProxy:
             d = subProxy.run(variant.absoluteUrl)
             #TODO add the deffered to self.finised somehow
 
-            masterVariant = HlsVarian()
+            masterVariant = copy.deepcopy(variant)
             masterPlaylist.variants.append(masterVariant)
             masterVariant.absoluteUrl = str(variant.bandwidth) + "/stream.m3u8"
-            masterVariant.programId = variant.programId
-            masterVariant.bandwidth = variant.bandwidth
-            masterVariant.codecs = variant.codecs
+
+        for imedia, media in enumerate(playlist.medias):
+            if not media.relativeUrl:
+                # media without uri. This is valid. Just ignore it as there is not need to download anything
+                continue
+            # imedia is appended just in case greoup, name, language turn out to be the same after sanitization
+            mediaRelative = re.sub(r'[^\w-]', '', '{}-{}-{}-{}'.format(media.groupId, media.name, media.language, imedia))
+            relativePath = os.path.join(media.type, mediaRelative)
+            subOutDir = os.path.join(self.outDir, relativePath)
+            print "Starting a sub hls-proxy for channel with bandwith ", media.type, " in directory ", subOutDir
+            try:
+                os.makedirs(subOutDir)
+            except OSError as exc:
+                if exc.errno == errno.EEXIST and os.path.isdir(subOutDir):
+                    pass
+                else:
+                    raise
+            subProxy = HlsProxy(self.reactor)
+            subProxy.verbose = self.verbose
+            subProxy.download = self.download
+            subProxy.referer = self.referer
+            subProxy.dump_durations = self.dump_durations
+            subProxy.save_individual_playlists = self.save_individual_playlists
+            subProxy.setOutDir(subOutDir)
+            d = subProxy.run(media.absoluteUrl)
+            #TODO add the deffered to self.finised somehow
+
+            proxiedMedia = copy.deepcopy(media)
+            masterPlaylist.medias.append(proxiedMedia)
+            proxiedMedia.absoluteUrl = os.path.join(relativePath, "stream.m3u8")
 
         self.writeFile(self.getClientPlaylist(), masterPlaylist.toStr())
 
